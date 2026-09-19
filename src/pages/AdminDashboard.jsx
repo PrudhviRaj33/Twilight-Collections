@@ -1,15 +1,16 @@
 import React, { useState, useContext, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { StoreContext } from '../context/StoreContext';
-import { storage } from '../firebase';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { Search, Plus, Trash2, LogOut, Package, Grid, Pencil, Upload, X } from 'lucide-react';
+import { storage } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { sections, items, addSection, deleteSection, updateSection, addItem, deleteItem, updateItem, loading } = useContext(StoreContext);
   const [activeTab, setActiveTab] = useState('items');
 
+  // Protect route: redirect to /admin if not signed in via localStorage
   useEffect(() => {
     if (localStorage.getItem('twc_auth') !== 'true') {
       navigate('/admin');
@@ -36,9 +37,9 @@ const AdminDashboard = () => {
         </div>
       </header>
 
-      <div className="container" style={{ display: 'flex', gap: '2rem', padding: '2rem var(--spacing-lg)', flexGrow: 1, alignItems: 'flex-start' }}>
+      <div className="container admin-layout" style={{ display: 'flex', gap: '2rem', padding: '2rem var(--spacing-lg)', flexGrow: 1, alignItems: 'flex-start' }}>
         {/* Sidebar */}
-        <aside style={{ width: '200px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem', position: 'sticky', top: '2rem' }}>
+        <aside className="admin-sidebar" style={{ width: '200px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem', position: 'sticky', top: '2rem' }}>
           <button onClick={() => setActiveTab('items')} className={activeTab === 'items' ? 'btn-primary' : 'btn-secondary'} style={{ justifyContent: 'flex-start', width: '100%', padding: '0.75rem 1rem', fontSize: '0.8rem' }}>
             <Package size={16} /> Manage Items
           </button>
@@ -61,31 +62,59 @@ const AdminDashboard = () => {
   );
 };
 
-// --- Image Uploader Component ---
+// --- Image Uploader Component (Firebase Storage) ---
 const ImageUploader = ({ imageUrl, onUploadComplete }) => {
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
   const fileInputRef = useRef();
 
-  const handleFile = (file) => {
+  const handleFile = async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
-    const storageRef = ref(storage, `products/${Date.now()}_${file.name}`);
-    const uploadTask = uploadBytesResumable(storageRef, file);
     setUploading(true);
-    uploadTask.on('state_changed',
-      (snapshot) => {
-        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-        setProgress(pct);
-      },
-      (error) => { console.error(error); setUploading(false); },
-      async () => {
-        const url = await getDownloadURL(uploadTask.snapshot.ref);
-        onUploadComplete(url);
-        setUploading(false);
-        setProgress(0);
-      }
-    );
+    setError('');
+
+    try {
+      // 1. Compress image client-side using Canvas before uploading
+      const compressed = await compressImage(file);
+
+      // 2. Upload the compressed blob to Firebase Storage
+      const storageRef = ref(storage, `items/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, compressed, { contentType: 'image/webp' });
+
+      // 3. Get the public download URL and pass it back
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+      onUploadComplete(downloadUrl);
+    } catch (err) {
+      console.error('Upload failed:', err);
+      setError('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
   };
+
+  const compressImage = (file) =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const MAX = 600;
+          let { width, height } = img;
+          if (width > height) {
+            if (width > MAX) { height *= MAX / width; width = MAX; }
+          } else {
+            if (height > MAX) { width *= MAX / height; height = MAX; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => resolve(blob), 'image/webp', 0.75);
+        };
+      };
+    });
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -117,10 +146,8 @@ const ImageUploader = ({ imageUrl, onUploadComplete }) => {
           </div>
         ) : uploading ? (
           <div>
-            <div style={{ height: '4px', backgroundColor: 'var(--border-color)', borderRadius: '2px', marginBottom: '0.5rem' }}>
-              <div style={{ height: '100%', width: `${progress}%`, backgroundColor: 'var(--text-primary)', borderRadius: '2px', transition: 'width 0.3s' }}></div>
-            </div>
-            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Uploading... {progress}%</p>
+            <div style={{ height: '24px', width: '24px', borderRadius: '50%', border: '2px solid var(--border-color)', borderTopColor: 'var(--text-primary)', animation: 'spin 1s linear infinite', margin: '0 auto 0.5rem' }}></div>
+            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Uploading to storage...</p>
           </div>
         ) : (
           <div>
@@ -130,6 +157,7 @@ const ImageUploader = ({ imageUrl, onUploadComplete }) => {
           </div>
         )}
       </div>
+      {error && <p style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>{error}</p>}
       <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleFile(e.target.files[0])} />
     </div>
   );
@@ -137,7 +165,7 @@ const ImageUploader = ({ imageUrl, onUploadComplete }) => {
 
 // --- Manage Items Component ---
 const ManageItems = ({ sections, items, addItem, deleteItem, updateItem }) => {
-  const empty = { id: '', name: '', sectionId: '', description: '', price: '', imageUrl: '' };
+  const empty = { id: '', name: '', sectionId: '', description: '', price: '', imageUrl: '', soldOut: false };
   const [formData, setFormData] = useState(empty);
   const [isEditing, setIsEditing] = useState(false);
   const [editFirestoreId, setEditFirestoreId] = useState(null);
@@ -166,7 +194,7 @@ const ManageItems = ({ sections, items, addItem, deleteItem, updateItem }) => {
   };
 
   const handleEdit = (item) => {
-    setFormData({ id: item.id, name: item.name, sectionId: item.sectionId, description: item.description, price: item.price, imageUrl: item.imageUrl });
+    setFormData({ id: item.id, name: item.name, sectionId: item.sectionId, description: item.description, price: item.price, imageUrl: item.imageUrl, soldOut: item.soldOut || false });
     setIsEditing(true);
     setEditFirestoreId(item.firestoreId);
     formRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -184,7 +212,7 @@ const ManageItems = ({ sections, items, addItem, deleteItem, updateItem }) => {
         {isEditing ? 'Edit Item' : 'Add New Item'}
       </h2>
 
-      <form onSubmit={handleSubmit} style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '2rem', marginBottom: '2rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+      <form onSubmit={handleSubmit} className="admin-form" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '2rem', marginBottom: '2rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
         <input className="input-field" placeholder="Item ID (e.g. TWC-104)" value={formData.id} onChange={e => setFormData({ ...formData, id: e.target.value })} required disabled={isEditing} />
         <input className="input-field" placeholder="Item Name" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} required />
         <select className="input-field" value={formData.sectionId} onChange={e => setFormData({ ...formData, sectionId: e.target.value })} required style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
@@ -193,8 +221,12 @@ const ManageItems = ({ sections, items, addItem, deleteItem, updateItem }) => {
         </select>
         <input className="input-field" type="number" placeholder="Price (₹)" value={formData.price} onChange={e => setFormData({ ...formData, price: e.target.value })} required />
         <textarea className="input-field" placeholder="Description" value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} required rows="3" style={{ gridColumn: '1 / -1', resize: 'vertical' }}></textarea>
+        <label style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', fontSize: '0.875rem', userSelect: 'none' }}>
+          <input type="checkbox" checked={!!formData.soldOut} onChange={e => setFormData({ ...formData, soldOut: e.target.checked })} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+          Mark as <strong>Sold Out</strong> (hides order buttons on storefront)
+        </label>
 
-        {/* Image Uploader */}
+        {/* Image Uploader — now uploads to Firebase Storage */}
         <ImageUploader imageUrl={formData.imageUrl} onUploadComplete={(url) => setFormData(prev => ({ ...prev, imageUrl: url }))} />
 
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '1rem' }}>
@@ -265,7 +297,7 @@ const ManageSections = ({ sections, addSection, deleteSection, updateSection }) 
   return (
     <div>
       <h2 className="text-serif" style={{ fontSize: '1.5rem', marginBottom: '1.5rem' }}>{isEditing ? 'Edit Section' : 'Add New Section'}</h2>
-      <form onSubmit={handleSubmit} style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '2rem', marginBottom: '2rem', display: 'flex', gap: '1rem' }}>
+      <form onSubmit={handleSubmit} className="sections-form" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '2rem', marginBottom: '2rem', display: 'flex', gap: '1rem' }}>
         <input className="input-field" placeholder="Section Name (e.g. Rings)" value={name} onChange={e => setName(e.target.value)} required />
         <button type="submit" className="btn-primary" style={{ whiteSpace: 'nowrap' }} disabled={saving}>
           {saving ? 'Saving...' : isEditing ? 'Update' : <><Plus size={16} /> Add Section</>}
@@ -320,7 +352,7 @@ const SearchItems = ({ items }) => {
       {searched && (
         <div className="animate-fade-in-up">
           {result ? (
-            <div style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '2rem', display: 'flex', gap: '2rem', alignItems: 'center' }}>
+            <div className="search-result" style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '2rem', display: 'flex', gap: '2rem', alignItems: 'center' }}>
               <img src={result.imageUrl} alt={result.name} style={{ width: '140px', height: '140px', objectFit: 'cover' }} />
               <div>
                 <h3 className="text-serif" style={{ fontSize: '1.5rem', margin: '0 0 0.25rem' }}>{result.name}</h3>

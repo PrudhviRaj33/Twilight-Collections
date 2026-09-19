@@ -1,86 +1,182 @@
 import React, { createContext, useState, useEffect } from 'react';
 import {
   collection,
-  onSnapshot,
+  getDocs,
   addDoc,
   updateDoc,
   deleteDoc,
   doc,
-  serverTimestamp,
   query,
+  where,
   orderBy
-} from 'firebase/firestore';
+} from 'firebase/firestore/lite';
 import { db } from '../firebase';
 
 export const StoreContext = createContext();
 
 export const StoreProvider = ({ children }) => {
-  const [sections, setSections] = useState([]);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [sections, setSections] = useState(() => {
+    const cached = localStorage.getItem('twc_cache_sections');
+    return cached ? JSON.parse(cached) : [];
+  });
+  const [itemsMap, setItemsMap] = useState(() => {
+    const cached = localStorage.getItem('twc_cache_items_map');
+    return cached ? JSON.parse(cached) : {};
+  });
+  const [loading, setLoading] = useState(sections.length === 0);
+  const [activeSectionId, setActiveSectionId] = useState(null);
+  const [loadingItems, setLoadingItems] = useState(false);
 
-  // Listen to sections in real-time
+  // Fetch sections (categories) on mount
   useEffect(() => {
-    const q = query(collection(db, 'sections'), orderBy('createdAt', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
-      setSections(data);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching sections:", error);
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    const fetchSections = async () => {
+      try {
+        const sectionsSnap = await getDocs(query(collection(db, 'sections'), orderBy('createdAt', 'asc')));
+        const fetchedSections = sectionsSnap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
+        
+        setSections(fetchedSections);
+        localStorage.setItem('twc_cache_sections', JSON.stringify(fetchedSections));
+      } catch (err) {
+        console.error('Error fetching sections:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSections();
   }, []);
 
-  // Listen to items in real-time
+  // Set initial active section once sections are loaded
   useEffect(() => {
-    const q = query(collection(db, 'items'), orderBy('createdAt', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
-      setItems(data);
-    });
-    return () => unsubscribe();
-  }, []);
+    if (sections.length > 0 && !activeSectionId) {
+      setActiveSectionId(sections[0].id);
+    }
+  }, [sections, activeSectionId]);
+
+  // Fetch items for the active section dynamically
+  useEffect(() => {
+    if (!activeSectionId) return;
+
+    const fetchItemsForSection = async () => {
+      // If we don't have items cached for this section, show local loading spinner
+      if (!itemsMap[activeSectionId]) {
+        setLoadingItems(true);
+      }
+
+      try {
+        const q = query(
+          collection(db, 'items'),
+          where('sectionId', '==', activeSectionId)
+        );
+        const itemsSnap = await getDocs(q);
+        
+        // Sort in memory to avoid Firestore composite index requirement
+        const fetchedItems = itemsSnap.docs
+          .map(d => ({ firestoreId: d.id, ...d.data() }))
+          .sort((a, b) => {
+            const timeA = a.createdAt?.seconds || 0;
+            const timeB = b.createdAt?.seconds || 0;
+            return timeA - timeB;
+          });
+
+        setItemsMap(prev => {
+          const updated = { ...prev, [activeSectionId]: fetchedItems };
+          localStorage.setItem('twc_cache_items_map', JSON.stringify(updated));
+          return updated;
+        });
+      } catch (err) {
+        console.error(`Error fetching items for section ${activeSectionId}:`, err);
+      } finally {
+        setLoadingItems(false);
+      }
+    };
+
+    fetchItemsForSection();
+  }, [activeSectionId]);
 
   // --- Sections ---
   const addSection = async (name) => {
-    await addDoc(collection(db, 'sections'), {
+    const docRef = await addDoc(collection(db, 'sections'), {
       id: `sec-${Date.now()}`,
       name,
-      createdAt: serverTimestamp()
+      createdAt: new Date()
+    });
+    const newSection = { firestoreId: docRef.id, id: `sec-${Date.now()}`, name };
+    setSections(prev => {
+      const updated = [...prev, newSection];
+      localStorage.setItem('twc_cache_sections', JSON.stringify(updated));
+      return updated;
     });
   };
 
   const deleteSection = async (firestoreId) => {
     await deleteDoc(doc(db, 'sections', firestoreId));
+    setSections(prev => {
+      const updated = prev.filter(s => s.firestoreId !== firestoreId);
+      localStorage.setItem('twc_cache_sections', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const updateSection = async (firestoreId, newName) => {
     await updateDoc(doc(db, 'sections', firestoreId), { name: newName });
+    setSections(prev => {
+      const updated = prev.map(s => s.firestoreId === firestoreId ? { ...s, name: newName } : s);
+      localStorage.setItem('twc_cache_sections', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   // --- Items ---
   const addItem = async (item) => {
-    await addDoc(collection(db, 'items'), {
+    const docRef = await addDoc(collection(db, 'items'), {
       ...item,
-      createdAt: serverTimestamp()
+      createdAt: new Date()
+    });
+    const newItem = { firestoreId: docRef.id, ...item };
+    setItemsMap(prev => {
+      const sectionItems = prev[item.sectionId] || [];
+      const updated = { ...prev, [item.sectionId]: [...sectionItems, newItem] };
+      localStorage.setItem('twc_cache_items_map', JSON.stringify(updated));
+      return updated;
     });
   };
 
   const deleteItem = async (firestoreId) => {
     await deleteDoc(doc(db, 'items', firestoreId));
+    setItemsMap(prev => {
+      const updated = {};
+      Object.keys(prev).forEach(sectionId => {
+        updated[sectionId] = prev[sectionId].filter(i => i.firestoreId !== firestoreId);
+      });
+      localStorage.setItem('twc_cache_items_map', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const updateItem = async (firestoreId, updatedItem) => {
     await updateDoc(doc(db, 'items', firestoreId), updatedItem);
+    setItemsMap(prev => {
+      const updated = {};
+      Object.keys(prev).forEach(sectionId => {
+        updated[sectionId] = prev[sectionId].map(i => i.firestoreId === firestoreId ? { ...i, ...updatedItem } : i);
+      });
+      localStorage.setItem('twc_cache_items_map', JSON.stringify(updated));
+      return updated;
+    });
   };
+
+  // Compatibility helpers for Admin Dashboard
+  const allItemsList = Object.values(itemsMap).flat();
 
   return (
     <StoreContext.Provider value={{
       sections,
-      items,
+      items: allItemsList, // admin compatibility
+      activeSectionItems: itemsMap[activeSectionId] || [],
       loading,
+      loadingItems,
+      activeSectionId,
+      setActiveSectionId,
       addSection,
       deleteSection,
       updateSection,

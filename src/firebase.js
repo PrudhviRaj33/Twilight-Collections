@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore/lite";
 import { getStorage } from "firebase/storage";
+import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAIyvoC7rAFPLeixIV6FJH4QXx3GdgQuk0",
@@ -13,5 +14,9 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+// Use Firestore Lite to completely eliminate background channel/WebSocket long-polling
+// and significantly reduce the bundle size.
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const auth = getAuth(app);

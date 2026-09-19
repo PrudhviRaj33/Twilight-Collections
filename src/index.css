@@ -36,6 +36,11 @@
   padding: 0;
 }
 
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   font-family: 'Inter', sans-serif;
   background-color: var(--bg-primary);
@@ -165,6 +170,11 @@ button {
   to { transform: rotate(360deg); }
 }
 
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 .animate-fade-in-up {
   animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -235,4 +245,150 @@ button {
   background: #ffffff;
   border: 1px solid var(--border-color);
   padding: 2rem;
+}
+
+/* ============================
+   RESPONSIVE — MOBILE FIRST
+   ============================ */
+
+/* Base: set gap on category tabs */
+.category-tabs {
+  gap: 1.75rem;
+}
+
+/* ── Tablet & below (768px) ── */
+@media (max-width: 768px) {
+  .container {
+    padding: 0 0.875rem;
+  }
+
+  /* Nav brand smaller */
+  .nav-brand {
+    font-size: 1.05rem !important;
+    letter-spacing: 0.03em !important;
+  }
+
+  /* Hero tighter */
+  .hero-section {
+    min-height: 45vh !important;
+  }
+
+  /* Product grid: 2 columns on tablet */
+  .product-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 1rem !important;
+  }
+
+  /* Category tabs */
+  .category-tabs {
+    gap: 1.25rem !important;
+    justify-content: flex-start !important;
+    padding-left: 0.25rem;
+  }
+
+  /* Admin layout: sidebar on top */
+  .admin-layout {
+    flex-direction: column !important;
+    padding: 1rem !important;
+    gap: 1rem !important;
+  }
+
+  .admin-sidebar {
+    width: 100% !important;
+    flex-direction: row !important;
+    position: static !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .admin-sidebar button {
+    flex-shrink: 0;
+    justify-content: center !important;
+    padding: 0.6rem 1rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* Admin form single column */
+  .admin-form {
+    grid-template-columns: 1fr !important;
+    padding: 1.25rem !important;
+  }
+
+  /* Search result stacked */
+  .search-result {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 1rem !important;
+  }
+
+  .search-result img {
+    width: 100% !important;
+    height: 200px !important;
+    object-fit: cover;
+  }
+
+  /* Sections form stacked */
+  .sections-form {
+    flex-direction: column !important;
+  }
+
+  /* Footer title */
+  .footer-title {
+    font-size: 1.2rem !important;
+  }
+
+  /* Floating CTA: stack vertically on tablet */
+  .floating-cta {
+    flex-direction: column !important;
+    gap: 0.4rem !important;
+    padding: 0.6rem 1rem !important;
+    border-radius: 1rem !important;
+  }
+
+  .floating-cta-divider {
+    display: none !important;
+  }
+}
+
+/* ── Phone only (≤480px) ── */
+@media (max-width: 480px) {
+  .container {
+    padding: 0 0.75rem;
+  }
+
+  .nav-brand {
+    font-size: 0.95rem !important;
+    letter-spacing: 0.01em !important;
+  }
+
+  /* Product grid: 2 cols on phone too (min 150px works at 320px+) */
+  .product-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.75rem !important;
+  }
+
+  /* Product image tighter ratio on phone */
+  .product-image-container {
+    aspect-ratio: 3/3.5 !important;
+  }
+
+  /* Collection section padding */
+  .collection-section {
+    padding: 1.5rem 0.75rem 2.5rem !important;
+  }
+
+  /* Category tabs tight */
+  .category-tabs {
+    gap: 1rem !important;
+  }
+
+  /* Hero */
+  .hero-section {
+    min-height: 40vh !important;
+  }
+
+  /* Footer */
+  .footer-title {
+    font-size: 1.1rem !important;
+  }
 }
